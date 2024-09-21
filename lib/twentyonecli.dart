@@ -26,7 +26,7 @@ Queue<WorldEvent> bet(World w, int amount) {
     queue.add(_applyHandResult(w, result));
   } else if (_calculateHandValue(w._dealersHand) == 10 ||
       _calculateHandValue(w._dealersHand) == 11) {
-    w._availableActions = {"insurance_yes", "insurance_no"};
+    w._availableActions = {"yes", "no"};
     // TODO: don't allow user to select insuranc yes if they don't have enough chips.
   } else {
     _setAvailableActionsToFirst(w);
@@ -40,6 +40,9 @@ void _setAvailableActionsToFirst(World w) {
   w._availableActions = {"hit", "stand"};
   if (w._chips >= w._bet) {
     w._availableActions.add("doubledown");
+  }
+  if (w._hand[0]._cardRank._highValue == w._hand[1]._cardRank._highValue) {
+    w._availableActions.add("split");
   }
 }
 
@@ -103,9 +106,9 @@ WorldEvent _applyHandResult(World w, HandResult result) {
   }
   var event = WorldEvent(World.from(w), WorldReaction.HandResolved);
   //Reset.
+  w._hand.clear();
   w._bet = 0;
   w._insuranceBet = 0;
-  w._hand = [];
   w._dealersHand = [];
   w._hasPlayerStood = false;
   w._availableActions = {"bet"};
@@ -188,26 +191,37 @@ Queue<WorldEvent> insurance_decline(World w) {
 }
 
 //Phase 4
-void split(World w) {
-  //process Reactionary state changes.
+Queue<WorldEvent> split(World w) {
+  if (w._chips < w._bet) {
+    throw "Not enough chips";
+  }
+  Queue<WorldEvent> queue = Queue<WorldEvent>();
+  w._hands.add(Hand([w._hand[1]], w._bet));
+  w._chips -= w._bet;
+  w._hand.removeAt(1);
+  queue.add(_dealCardToPlayer(w));
+  _dealCardToHand(w, w._hands.last._cards, true);
+  queue.add(WorldEvent(w, WorldReaction.Split));
+  return queue;
 }
 
 WorldEvent _dealCardToPlayer(World w) {
-  var drawn = w._deck.first;
-  w._deck.removeAt(0);
-  w._hand.add(drawn);
-  drawn._flip();
+  _dealCardToHand(w, w._hand, true);
   return WorldEvent(World.from(w), WorldReaction.CardDealtToPlayer);
 }
 
 WorldEvent _dealCardToDealer(World w, bool reveal) {
+  _dealCardToHand(w, w._dealersHand, reveal);
+  return WorldEvent(World.from(w), WorldReaction.CardDealtToDealer);
+}
+
+_dealCardToHand(World w, List<Card> hand, bool reveal) {
   var drawn = w._deck.first;
   w._deck.removeAt(0);
-  w._dealersHand.add(drawn);
+  hand.add(drawn);
   if (reveal) {
     drawn._flip();
   }
-  return WorldEvent(World.from(w), WorldReaction.CardDealtToDealer);
 }
 
 List<WorldEvent> _resovleDealerBlackjack(World w) {
@@ -253,6 +267,18 @@ int _calculateHandValue(List<Card> hand, {bool peak = false}) {
   return value;
 }
 
+String _printPlayer(World w) {
+  if (w._hands.length > 1) {
+    String str = "\n";
+    for (var hand in w._hands) {
+      str += _printHand(hand._cards);
+    }
+    return str;
+  } else {
+    return _printHand(w._hand);
+  }
+}
+
 String _printHand(List<Card> hand) {
   String ret = "";
   for (var card in hand) {
@@ -270,23 +296,38 @@ class World {
   Set<String> getAvailableActions() =>
       Set<String>.unmodifiable(_availableActions);
   String getStateStr() =>
-      "Balance: $_chips\nDealer:${_printHand(_dealersHand)}\nYou:${_printHand(_hand)}\nBet:$_bet";
+      "Balance: $_chips\nDealer:${_printHand(_dealersHand)}\nYou:${_printPlayer(this)}\nBet:$_bet";
 
   List<Card> _deck;
   List<Card> _dealersHand = [];
   Set<String> _availableActions = <String>{"bet"};
   int _chips;
-  int _bet = 0;
   int _insuranceBet = 0;
-  List<Card> _hand = [];
+  int _activeHand = 0;
+  List<Hand> _hands = [Hand([], 0)];
   bool _hasPlayerStood = false;
+
+  List<Card> get _hand {
+    return _hands[_activeHand]._cards;
+  }
+
+  int get _bet {
+    return _hands[_activeHand]._bet;
+  }
+
+  set _bet(int value) {
+    _hands[_activeHand]._bet = value;
+  }
 
   factory World.from(World source) {
     var deck = List<Card>.from(source._deck);
     var world = World._internal(source._chips, deck);
     world._dealersHand = List<Card>.from(source._dealersHand);
-    world._hand = List<Card>.from(source._hand);
-    world._bet = source._bet;
+    world._hands = [];
+    for (var hand in source._hands) {
+      world._hands.add(Hand.from(hand));
+    }
+    world._activeHand = source._activeHand;
     world._hasPlayerStood = source._hasPlayerStood;
     world._availableActions = Set<String>.from(source._availableActions);
 
@@ -323,6 +364,7 @@ enum WorldReaction {
   CardDealtToDealer,
   HandResolved,
   AwaitingUserInput,
+  Split,
 }
 
 enum HandResult {
@@ -332,6 +374,15 @@ enum HandResult {
   insuranceWin,
   tie,
   unresolved
+}
+
+class Hand {
+  List<Card> _cards;
+  int _bet;
+  Hand(this._cards, this._bet);
+  factory Hand.from(Hand source) {
+    return Hand(List<Card>.from(source._cards), source._bet);
+  }
 }
 
 class Card {

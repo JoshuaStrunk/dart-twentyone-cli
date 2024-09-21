@@ -19,8 +19,9 @@ Future<void> main(List<String> arguments) async {
         "hit" => hit(world),
         "stand" => stand(world),
         "doubledown" => double_down(world),
-        "insurance_yes" => insurance_purchase(world),
-        "insurance_no" => insurance_decline(world),
+        "yes" => insurance_purchase(world),
+        "no" => insurance_decline(world),
+        "split" => split(world),
         _ => Queue<WorldEvent>()
       };
 
